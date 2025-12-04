@@ -134,7 +134,7 @@ const usersApi = withRateLimit(new pipedrive.UsersApi(apiClient));
 // Create MCP server
 const server = new McpServer({
   name: "pipedrive-mcp-server",
-  version: "1.0.2",
+  version: "2.0.0",
   capabilities: {
     resources: {},
     tools: {},
@@ -823,6 +823,1355 @@ server.tool(
         content: [{
           type: "text",
           text: `Error performing search: ${getErrorMessage(error)}`
+        }],
+        isError: true
+      };
+    }
+  }
+);
+
+// === WRITE OPERATIONS ===
+
+// --- Deal Write Operations ---
+
+server.tool(
+  "create-deal",
+  "Create a new deal in Pipedrive. All deals created through the API have origin='API'.",
+  {
+    title: z.string().describe("Deal title (required)"),
+    value: z.number().optional().describe("Deal value (monetary amount)"),
+    currency: z.string().optional().describe("Currency code (e.g., 'USD', 'EUR'). Must match account's allowed currencies."),
+    personId: z.number().optional().describe("ID of the person this deal is associated with"),
+    orgId: z.number().optional().describe("ID of the organization this deal is associated with"),
+    stageId: z.number().optional().describe("ID of the pipeline stage (use get-stages to find IDs)"),
+    pipelineId: z.number().optional().describe("ID of the pipeline (use get-pipelines to find IDs)"),
+    status: z.enum(['open', 'won', 'lost']).optional().describe("Deal status (default: open)"),
+    expectedCloseDate: z.string().optional().describe("Expected close date in YYYY-MM-DD format"),
+    probability: z.number().optional().describe("Success probability percentage (0-100)"),
+    lostReason: z.string().optional().describe("Reason for lost deal (only used if status=lost)"),
+    visibleTo: z.enum(['1', '3', '5', '7']).optional().describe("Visibility: 1=Owner only, 3=Owner+followers, 5=All users, 7=Entire company"),
+    ownerId: z.number().optional().describe("Owner user ID (use get-users to find IDs)")
+  },
+  async ({
+    title,
+    value,
+    currency,
+    personId,
+    orgId,
+    stageId,
+    pipelineId,
+    status,
+    expectedCloseDate,
+    probability,
+    lostReason,
+    visibleTo,
+    ownerId
+  }) => {
+    try {
+      // Validate required fields
+      if (!title || title.trim() === '') {
+        return {
+          content: [{
+            type: "text",
+            text: "Error: 'title' is required and cannot be empty"
+          }],
+          isError: true
+        };
+      }
+
+      // Build request object with snake_case field names
+      const newDeal: any = {
+        title: title.trim(),
+      };
+
+      // Add optional fields only if provided
+      if (value !== undefined) newDeal.value = value;
+      if (currency) newDeal.currency = currency;
+      if (personId) newDeal.person_id = personId;
+      if (orgId) newDeal.org_id = orgId;
+      if (stageId) newDeal.stage_id = stageId;
+      if (pipelineId) newDeal.pipeline_id = pipelineId;
+      if (status) newDeal.status = status;
+      if (expectedCloseDate) newDeal.expected_close_date = expectedCloseDate;
+      if (probability !== undefined) newDeal.probability = probability;
+      if (lostReason) newDeal.lost_reason = lostReason;
+      if (visibleTo) newDeal.visible_to = parseInt(visibleTo);
+      if (ownerId) newDeal.user_id = ownerId;
+
+      // Call API - Old SDK pattern: pass object directly
+      // @ts-ignore - SDK types may be incomplete
+      const response = await dealsApi.addDeal(newDeal);
+
+      if (!response.data) {
+        return {
+          content: [{
+            type: "text",
+            text: "Error: API returned no data"
+          }],
+          isError: true
+        };
+      }
+
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            success: true,
+            message: `Deal "${response.data.title}" created successfully`,
+            deal_id: response.data.id,
+            deal: response.data
+          }, null, 2)
+        }]
+      };
+    } catch (error) {
+      console.error("Error creating deal:", error);
+      return {
+        content: [{
+          type: "text",
+          text: `Error creating deal: ${getErrorMessage(error)}`
+        }],
+        isError: true
+      };
+    }
+  }
+);
+
+server.tool(
+  "update-deal",
+  "Update an existing deal in Pipedrive",
+  {
+    id: z.number().describe("Deal ID (required)"),
+    title: z.string().optional().describe("Deal title"),
+    value: z.number().optional().describe("Deal value"),
+    currency: z.string().optional().describe("Currency code"),
+    personId: z.number().optional().describe("ID of the person"),
+    orgId: z.number().optional().describe("ID of the organization"),
+    stageId: z.number().optional().describe("ID of the pipeline stage"),
+    pipelineId: z.number().optional().describe("ID of the pipeline"),
+    status: z.enum(['open', 'won', 'lost']).optional().describe("Deal status"),
+    expectedCloseDate: z.string().optional().describe("Expected close date (YYYY-MM-DD)"),
+    probability: z.number().optional().describe("Success probability (0-100)"),
+    lostReason: z.string().optional().describe("Reason for lost deal"),
+    visibleTo: z.enum(['1', '3', '5', '7']).optional().describe("Visibility setting"),
+    ownerId: z.number().optional().describe("Owner user ID")
+  },
+  async ({
+    id,
+    title,
+    value,
+    currency,
+    personId,
+    orgId,
+    stageId,
+    pipelineId,
+    status,
+    expectedCloseDate,
+    probability,
+    lostReason,
+    visibleTo,
+    ownerId
+  }) => {
+    try {
+      // Verify deal exists
+      // @ts-ignore
+      const existing = await dealsApi.getDeal({ id });
+      if (!existing.data) {
+        return {
+          content: [{
+            type: "text",
+            text: `Error: Deal ${id} not found`
+          }],
+          isError: true
+        };
+      }
+
+      // Build update object
+      const updateDeal: any = {};
+
+      if (title) updateDeal.title = title;
+      if (value !== undefined) updateDeal.value = value;
+      if (currency) updateDeal.currency = currency;
+      if (personId) updateDeal.person_id = personId;
+      if (orgId) updateDeal.org_id = orgId;
+      if (stageId) updateDeal.stage_id = stageId;
+      if (pipelineId) updateDeal.pipeline_id = pipelineId;
+      if (status) updateDeal.status = status;
+      if (expectedCloseDate) updateDeal.expected_close_date = expectedCloseDate;
+      if (probability !== undefined) updateDeal.probability = probability;
+      if (lostReason) updateDeal.lost_reason = lostReason;
+      if (visibleTo) updateDeal.visible_to = parseInt(visibleTo);
+      if (ownerId) updateDeal.user_id = ownerId;
+
+      // Call API - Old SDK pattern: (id, updateObject)
+      // @ts-ignore
+      const response = await dealsApi.updateDeal(id, updateDeal);
+
+      if (!response.data) {
+        return {
+          content: [{
+            type: "text",
+            text: "Error: API returned no data"
+          }],
+          isError: true
+        };
+      }
+
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            success: true,
+            message: `Deal ${id} updated successfully`,
+            deal: response.data
+          }, null, 2)
+        }]
+      };
+    } catch (error) {
+      console.error(`Error updating deal ${id}:`, error);
+      return {
+        content: [{
+          type: "text",
+          text: `Error updating deal: ${getErrorMessage(error)}`
+        }],
+        isError: true
+      };
+    }
+  }
+);
+
+server.tool(
+  "delete-deal",
+  "Delete a deal (soft delete with 30-day recovery). CAUTION: This is a destructive operation.",
+  {
+    id: z.number().describe("ID of the deal to delete"),
+    confirm: z.literal(true).describe("Must be set to true to confirm deletion")
+  },
+  async ({ id, confirm }) => {
+    try {
+      // Verify deal exists and get title for response
+      // @ts-ignore
+      const existing = await dealsApi.getDeal({ id });
+      if (!existing.data) {
+        return {
+          content: [{
+            type: "text",
+            text: `Error: Deal ${id} not found`
+          }],
+          isError: true
+        };
+      }
+
+      const dealTitle = existing.data.title;
+
+      // Perform deletion
+      // @ts-ignore
+      await dealsApi.deleteDeal({ id });
+
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            success: true,
+            message: `Deal "${dealTitle}" (ID: ${id}) has been deleted`,
+            note: "This is a soft delete. The deal can be recovered within 30 days via Pipedrive UI: Settings > Data fields > Deleted items",
+            deleted_deal_id: id
+          }, null, 2)
+        }]
+      };
+    } catch (error) {
+      console.error(`Error deleting deal ${id}:`, error);
+      return {
+        content: [{
+          type: "text",
+          text: `Error deleting deal: ${getErrorMessage(error)}`
+        }],
+        isError: true
+      };
+    }
+  }
+);
+
+// --- Person Write Operations ---
+
+server.tool(
+  "create-person",
+  "Create a new person (contact) in Pipedrive",
+  {
+    name: z.string().describe("Person's name (required)"),
+    email: z.string().email().optional().describe("Email address"),
+    phone: z.string().optional().describe("Phone number"),
+    orgId: z.number().optional().describe("ID of the organization this person belongs to"),
+    ownerId: z.number().optional().describe("Owner user ID"),
+    visibleTo: z.enum(['1', '3', '5', '7']).optional().describe("Visibility: 1=Owner only, 3=Owner+followers, 5=All users, 7=Entire company")
+  },
+  async ({ name, email, phone, orgId, ownerId, visibleTo }) => {
+    try {
+      if (!name || name.trim() === '') {
+        return {
+          content: [{
+            type: "text",
+            text: "Error: 'name' is required and cannot be empty"
+          }],
+          isError: true
+        };
+      }
+
+      const newPerson: any = {
+        name: name.trim()
+      };
+
+      // Build email array if provided
+      if (email) {
+        newPerson.email = [{
+          value: email,
+          primary: true,
+          label: 'work'
+        }];
+      }
+
+      // Build phone array if provided
+      if (phone) {
+        newPerson.phone = [{
+          value: phone,
+          primary: true,
+          label: 'work'
+        }];
+      }
+
+      if (orgId) newPerson.org_id = orgId;
+      if (ownerId) newPerson.owner_id = ownerId;
+      if (visibleTo) newPerson.visible_to = parseInt(visibleTo);
+
+      // @ts-ignore - Old SDK pattern: pass object directly
+      const response = await personsApi.addPerson(newPerson);
+
+      if (!response.data) {
+        return {
+          content: [{
+            type: "text",
+            text: "Error: API returned no data"
+          }],
+          isError: true
+        };
+      }
+
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            success: true,
+            message: `Person "${response.data.name}" created successfully`,
+            person_id: response.data.id,
+            person: response.data
+          }, null, 2)
+        }]
+      };
+    } catch (error) {
+      console.error("Error creating person:", error);
+      return {
+        content: [{
+          type: "text",
+          text: `Error creating person: ${getErrorMessage(error)}`
+        }],
+        isError: true
+      };
+    }
+  }
+);
+
+server.tool(
+  "update-person",
+  "Update an existing person in Pipedrive",
+  {
+    id: z.number().describe("Person ID (required)"),
+    name: z.string().optional().describe("Person's name"),
+    email: z.string().email().optional().describe("Email address"),
+    phone: z.string().optional().describe("Phone number"),
+    orgId: z.number().optional().describe("Organization ID"),
+    ownerId: z.number().optional().describe("Owner user ID"),
+    visibleTo: z.enum(['1', '3', '5', '7']).optional().describe("Visibility setting")
+  },
+  async ({ id, name, email, phone, orgId, ownerId, visibleTo }) => {
+    try {
+      // Verify person exists
+      // @ts-ignore
+      const existing = await personsApi.getPerson({ id });
+      if (!existing.data) {
+        return {
+          content: [{
+            type: "text",
+            text: `Error: Person ${id} not found`
+          }],
+          isError: true
+        };
+      }
+
+      const updatePerson: any = {};
+
+      if (name) updatePerson.name = name;
+
+      if (email) {
+        updatePerson.email = [{
+          value: email,
+          primary: true,
+          label: 'work'
+        }];
+      }
+
+      if (phone) {
+        updatePerson.phone = [{
+          value: phone,
+          primary: true,
+          label: 'work'
+        }];
+      }
+
+      if (orgId) updatePerson.org_id = orgId;
+      if (ownerId) updatePerson.owner_id = ownerId;
+      if (visibleTo) updatePerson.visible_to = parseInt(visibleTo);
+
+      // @ts-ignore - Old SDK pattern: (id, updateObject)
+      const response = await personsApi.updatePerson(id, updatePerson);
+
+      if (!response.data) {
+        return {
+          content: [{
+            type: "text",
+            text: "Error: API returned no data"
+          }],
+          isError: true
+        };
+      }
+
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            success: true,
+            message: `Person ${id} updated successfully`,
+            person: response.data
+          }, null, 2)
+        }]
+      };
+    } catch (error) {
+      console.error(`Error updating person ${id}:`, error);
+      return {
+        content: [{
+          type: "text",
+          text: `Error updating person: ${getErrorMessage(error)}`
+        }],
+        isError: true
+      };
+    }
+  }
+);
+
+server.tool(
+  "delete-person",
+  "Delete a person (soft delete with 30-day recovery). CAUTION: This is a destructive operation.",
+  {
+    id: z.number().describe("ID of the person to delete"),
+    confirm: z.literal(true).describe("Must be set to true to confirm deletion")
+  },
+  async ({ id, confirm }) => {
+    try {
+      // Verify person exists
+      // @ts-ignore
+      const existing = await personsApi.getPerson({ id });
+      if (!existing.data) {
+        return {
+          content: [{
+            type: "text",
+            text: `Error: Person ${id} not found`
+          }],
+          isError: true
+        };
+      }
+
+      const personName = existing.data.name;
+
+      // @ts-ignore
+      await personsApi.deletePerson({ id });
+
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            success: true,
+            message: `Person "${personName}" (ID: ${id}) has been deleted`,
+            note: "This is a soft delete. The person can be recovered within 30 days via Pipedrive UI: Settings > Data fields > Deleted items",
+            deleted_person_id: id
+          }, null, 2)
+        }]
+      };
+    } catch (error) {
+      console.error(`Error deleting person ${id}:`, error);
+      return {
+        content: [{
+          type: "text",
+          text: `Error deleting person: ${getErrorMessage(error)}`
+        }],
+        isError: true
+      };
+    }
+  }
+);
+
+// --- Organization Write Operations ---
+
+server.tool(
+  "create-organization",
+  "Create a new organization in Pipedrive",
+  {
+    name: z.string().describe("Organization name (required)"),
+    ownerId: z.number().optional().describe("Owner user ID"),
+    visibleTo: z.enum(['1', '3', '5', '7']).optional().describe("Visibility: 1=Owner only, 3=Owner+followers, 5=All users, 7=Entire company"),
+    address: z.string().optional().describe("Full organization address")
+  },
+  async ({ name, ownerId, visibleTo, address }) => {
+    try {
+      if (!name || name.trim() === '') {
+        return {
+          content: [{
+            type: "text",
+            text: "Error: 'name' is required and cannot be empty"
+          }],
+          isError: true
+        };
+      }
+
+      const newOrganization: any = {
+        name: name.trim()
+      };
+
+      if (ownerId) newOrganization.owner_id = ownerId;
+      if (visibleTo) newOrganization.visible_to = parseInt(visibleTo);
+
+      if (address) {
+        newOrganization.address = address;
+      }
+
+      // @ts-ignore - Old SDK pattern: pass object directly
+      const response = await organizationsApi.addOrganization(newOrganization);
+
+      if (!response.data) {
+        return {
+          content: [{
+            type: "text",
+            text: "Error: API returned no data"
+          }],
+          isError: true
+        };
+      }
+
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            success: true,
+            message: `Organization "${response.data.name}" created successfully`,
+            organization_id: response.data.id,
+            organization: response.data
+          }, null, 2)
+        }]
+      };
+    } catch (error) {
+      console.error("Error creating organization:", error);
+      return {
+        content: [{
+          type: "text",
+          text: `Error creating organization: ${getErrorMessage(error)}`
+        }],
+        isError: true
+      };
+    }
+  }
+);
+
+server.tool(
+  "update-organization",
+  "Update an existing organization in Pipedrive",
+  {
+    id: z.number().describe("Organization ID (required)"),
+    name: z.string().optional().describe("Organization name"),
+    ownerId: z.number().optional().describe("Owner user ID"),
+    visibleTo: z.enum(['1', '3', '5', '7']).optional().describe("Visibility setting"),
+    address: z.string().optional().describe("Full organization address")
+  },
+  async ({ id, name, ownerId, visibleTo, address }) => {
+    try {
+      // Verify organization exists
+      // @ts-ignore
+      const existing = await organizationsApi.getOrganization({ id });
+      if (!existing.data) {
+        return {
+          content: [{
+            type: "text",
+            text: `Error: Organization ${id} not found`
+          }],
+          isError: true
+        };
+      }
+
+      const updateOrganization: any = {};
+
+      if (name) updateOrganization.name = name;
+      if (ownerId) updateOrganization.owner_id = ownerId;
+      if (visibleTo) updateOrganization.visible_to = parseInt(visibleTo);
+      if (address) updateOrganization.address = address;
+
+      // @ts-ignore - Old SDK pattern: (id, updateObject)
+      const response = await organizationsApi.updateOrganization(id, updateOrganization);
+
+      if (!response.data) {
+        return {
+          content: [{
+            type: "text",
+            text: "Error: API returned no data"
+          }],
+          isError: true
+        };
+      }
+
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            success: true,
+            message: `Organization ${id} updated successfully`,
+            organization: response.data
+          }, null, 2)
+        }]
+      };
+    } catch (error) {
+      console.error(`Error updating organization ${id}:`, error);
+      return {
+        content: [{
+          type: "text",
+          text: `Error updating organization: ${getErrorMessage(error)}`
+        }],
+        isError: true
+      };
+    }
+  }
+);
+
+server.tool(
+  "delete-organization",
+  "Delete an organization (soft delete with 30-day recovery). CAUTION: This is a destructive operation.",
+  {
+    id: z.number().describe("ID of the organization to delete"),
+    confirm: z.literal(true).describe("Must be set to true to confirm deletion")
+  },
+  async ({ id, confirm }) => {
+    try {
+      // Verify organization exists
+      // @ts-ignore
+      const existing = await organizationsApi.getOrganization({ id });
+      if (!existing.data) {
+        return {
+          content: [{
+            type: "text",
+            text: `Error: Organization ${id} not found`
+          }],
+          isError: true
+        };
+      }
+
+      const orgName = existing.data.name;
+
+      // @ts-ignore
+      await organizationsApi.deleteOrganization({ id });
+
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            success: true,
+            message: `Organization "${orgName}" (ID: ${id}) has been deleted`,
+            note: "This is a soft delete. The organization can be recovered within 30 days via Pipedrive UI: Settings > Data fields > Deleted items",
+            deleted_organization_id: id
+          }, null, 2)
+        }]
+      };
+    } catch (error) {
+      console.error(`Error deleting organization ${id}:`, error);
+      return {
+        content: [{
+          type: "text",
+          text: `Error deleting organization: ${getErrorMessage(error)}`
+        }],
+        isError: true
+      };
+    }
+  }
+);
+
+// --- Activity Write Operations ---
+
+server.tool(
+  "create-activity",
+  "Create a new activity (task, call, meeting, etc.) in Pipedrive",
+  {
+    subject: z.string().describe("Activity subject/title (required)"),
+    type: z.string().describe("Activity type (required): e.g., 'call', 'meeting', 'task', 'deadline', 'email', 'lunch'"),
+    dueDate: z.string().optional().describe("Due date in YYYY-MM-DD format"),
+    dueTime: z.string().optional().describe("Due time in HH:MM format"),
+    duration: z.string().optional().describe("Duration in HH:MM format"),
+    dealId: z.number().optional().describe("ID of the deal this activity is associated with"),
+    personId: z.number().optional().describe("ID of the person this activity is associated with"),
+    orgId: z.number().optional().describe("ID of the organization this activity is associated with"),
+    note: z.string().optional().describe("Note content for the activity"),
+    done: z.boolean().optional().describe("Whether the activity is marked as done (default: false)")
+  },
+  async ({ subject, type, dueDate, dueTime, duration, dealId, personId, orgId, note, done }) => {
+    try {
+      if (!subject || subject.trim() === '') {
+        return {
+          content: [{
+            type: "text",
+            text: "Error: 'subject' is required and cannot be empty"
+          }],
+          isError: true
+        };
+      }
+
+      if (!type || type.trim() === '') {
+        return {
+          content: [{
+            type: "text",
+            text: "Error: 'type' is required and cannot be empty"
+          }],
+          isError: true
+        };
+      }
+
+      const newActivity: any = {
+        subject: subject.trim(),
+        type: type.trim()
+      };
+
+      if (dueDate) newActivity.due_date = dueDate;
+      if (dueTime) newActivity.due_time = dueTime;
+      if (duration) newActivity.duration = duration;
+      if (dealId) newActivity.deal_id = dealId;
+      if (personId) newActivity.person_id = personId;
+      if (orgId) newActivity.org_id = orgId;
+      if (note) newActivity.note = note;
+      if (done !== undefined) newActivity.done = done ? 1 : 0;
+
+      // @ts-ignore - Old SDK pattern: pass object directly
+      const response = await activitiesApi.addActivity(newActivity);
+
+      if (!response.data) {
+        return {
+          content: [{
+            type: "text",
+            text: "Error: API returned no data"
+          }],
+          isError: true
+        };
+      }
+
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            success: true,
+            message: `Activity "${response.data.subject}" created successfully`,
+            activity_id: response.data.id,
+            activity: response.data
+          }, null, 2)
+        }]
+      };
+    } catch (error) {
+      console.error("Error creating activity:", error);
+      return {
+        content: [{
+          type: "text",
+          text: `Error creating activity: ${getErrorMessage(error)}`
+        }],
+        isError: true
+      };
+    }
+  }
+);
+
+server.tool(
+  "update-activity",
+  "Update an existing activity in Pipedrive",
+  {
+    id: z.number().describe("Activity ID (required)"),
+    subject: z.string().optional().describe("Activity subject/title"),
+    type: z.string().optional().describe("Activity type"),
+    dueDate: z.string().optional().describe("Due date (YYYY-MM-DD)"),
+    dueTime: z.string().optional().describe("Due time (HH:MM)"),
+    duration: z.string().optional().describe("Duration (HH:MM)"),
+    dealId: z.number().optional().describe("Deal ID"),
+    personId: z.number().optional().describe("Person ID"),
+    orgId: z.number().optional().describe("Organization ID"),
+    note: z.string().optional().describe("Note content"),
+    done: z.boolean().optional().describe("Mark as done/undone")
+  },
+  async ({ id, subject, type, dueDate, dueTime, duration, dealId, personId, orgId, note, done }) => {
+    try {
+      // Verify activity exists
+      // @ts-ignore
+      const existing = await activitiesApi.getActivity({ id });
+      if (!existing.data) {
+        return {
+          content: [{
+            type: "text",
+            text: `Error: Activity ${id} not found`
+          }],
+          isError: true
+        };
+      }
+
+      const updateActivity: any = {};
+
+      if (subject) updateActivity.subject = subject;
+      if (type) updateActivity.type = type;
+      if (dueDate) updateActivity.due_date = dueDate;
+      if (dueTime) updateActivity.due_time = dueTime;
+      if (duration) updateActivity.duration = duration;
+      if (dealId) updateActivity.deal_id = dealId;
+      if (personId) updateActivity.person_id = personId;
+      if (orgId) updateActivity.org_id = orgId;
+      if (note) updateActivity.note = note;
+      if (done !== undefined) updateActivity.done = done ? 1 : 0;
+
+      // @ts-ignore - Old SDK pattern: (id, updateObject)
+      const response = await activitiesApi.updateActivity(id, updateActivity);
+
+      if (!response.data) {
+        return {
+          content: [{
+            type: "text",
+            text: "Error: API returned no data"
+          }],
+          isError: true
+        };
+      }
+
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            success: true,
+            message: `Activity ${id} updated successfully`,
+            activity: response.data
+          }, null, 2)
+        }]
+      };
+    } catch (error) {
+      console.error(`Error updating activity ${id}:`, error);
+      return {
+        content: [{
+          type: "text",
+          text: `Error updating activity: ${getErrorMessage(error)}`
+        }],
+        isError: true
+      };
+    }
+  }
+);
+
+server.tool(
+  "delete-activity",
+  "Delete an activity (soft delete with 30-day recovery). CAUTION: This is a destructive operation.",
+  {
+    id: z.number().describe("ID of the activity to delete"),
+    confirm: z.literal(true).describe("Must be set to true to confirm deletion")
+  },
+  async ({ id, confirm }) => {
+    try {
+      // Verify activity exists
+      // @ts-ignore
+      const existing = await activitiesApi.getActivity({ id });
+      if (!existing.data) {
+        return {
+          content: [{
+            type: "text",
+            text: `Error: Activity ${id} not found`
+          }],
+          isError: true
+        };
+      }
+
+      const activitySubject = existing.data.subject;
+
+      // @ts-ignore
+      await activitiesApi.deleteActivity({ id });
+
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            success: true,
+            message: `Activity "${activitySubject}" (ID: ${id}) has been deleted`,
+            note: "This is a soft delete. The activity can be recovered within 30 days via Pipedrive UI: Settings > Data fields > Deleted items",
+            deleted_activity_id: id
+          }, null, 2)
+        }]
+      };
+    } catch (error) {
+      console.error(`Error deleting activity ${id}:`, error);
+      return {
+        content: [{
+          type: "text",
+          text: `Error deleting activity: ${getErrorMessage(error)}`
+        }],
+        isError: true
+      };
+    }
+  }
+);
+
+// --- Note Write Operations ---
+
+server.tool(
+  "create-note",
+  "Create a new note in Pipedrive and attach it to a deal, person, organization, or lead",
+  {
+    content: z.string().describe("Note content (required)"),
+    dealId: z.number().optional().describe("ID of the deal to attach the note to"),
+    personId: z.number().optional().describe("ID of the person to attach the note to"),
+    orgId: z.number().optional().describe("ID of the organization to attach the note to"),
+    leadId: z.string().optional().describe("ID of the lead to attach the note to")
+  },
+  async ({ content, dealId, personId, orgId, leadId }) => {
+    try {
+      if (!content || content.trim() === '') {
+        return {
+          content: [{
+            type: "text",
+            text: "Error: 'content' is required and cannot be empty"
+          }],
+          isError: true
+        };
+      }
+
+      const newNote: any = {
+        content: content.trim()
+      };
+
+      if (dealId) newNote.deal_id = dealId;
+      if (personId) newNote.person_id = personId;
+      if (orgId) newNote.org_id = orgId;
+      if (leadId) newNote.lead_id = leadId;
+
+      // @ts-ignore - Old SDK pattern: pass object directly
+      const response = await notesApi.addNote(newNote);
+
+      if (!response.data) {
+        return {
+          content: [{
+            type: "text",
+            text: "Error: API returned no data"
+          }],
+          isError: true
+        };
+      }
+
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            success: true,
+            message: "Note created successfully",
+            note_id: response.data.id,
+            note: response.data
+          }, null, 2)
+        }]
+      };
+    } catch (error) {
+      console.error("Error creating note:", error);
+      return {
+        content: [{
+          type: "text",
+          text: `Error creating note: ${getErrorMessage(error)}`
+        }],
+        isError: true
+      };
+    }
+  }
+);
+
+server.tool(
+  "update-note",
+  "Update an existing note in Pipedrive",
+  {
+    id: z.number().describe("Note ID (required)"),
+    content: z.string().describe("Updated note content (required)")
+  },
+  async ({ id, content }) => {
+    try {
+      if (!content || content.trim() === '') {
+        return {
+          content: [{
+            type: "text",
+            text: "Error: 'content' is required and cannot be empty"
+          }],
+          isError: true
+        };
+      }
+
+      // Verify note exists
+      // @ts-ignore
+      const existing = await notesApi.getNote({ id });
+      if (!existing.data) {
+        return {
+          content: [{
+            type: "text",
+            text: `Error: Note ${id} not found`
+          }],
+          isError: true
+        };
+      }
+
+      const updateNote: any = {
+        content: content.trim()
+      };
+
+      // @ts-ignore - Old SDK pattern: (id, updateObject)
+      const response = await notesApi.updateNote(id, updateNote);
+
+      if (!response.data) {
+        return {
+          content: [{
+            type: "text",
+            text: "Error: API returned no data"
+          }],
+          isError: true
+        };
+      }
+
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            success: true,
+            message: `Note ${id} updated successfully`,
+            note: response.data
+          }, null, 2)
+        }]
+      };
+    } catch (error) {
+      console.error(`Error updating note ${id}:`, error);
+      return {
+        content: [{
+          type: "text",
+          text: `Error updating note: ${getErrorMessage(error)}`
+        }],
+        isError: true
+      };
+    }
+  }
+);
+
+server.tool(
+  "delete-note",
+  "Delete a note. CAUTION: This is a destructive operation.",
+  {
+    id: z.number().describe("ID of the note to delete"),
+    confirm: z.literal(true).describe("Must be set to true to confirm deletion")
+  },
+  async ({ id, confirm }) => {
+    try {
+      // Verify note exists
+      // @ts-ignore
+      const existing = await notesApi.getNote({ id });
+      if (!existing.data) {
+        return {
+          content: [{
+            type: "text",
+            text: `Error: Note ${id} not found`
+          }],
+          isError: true
+        };
+      }
+
+      // @ts-ignore
+      await notesApi.deleteNote({ id });
+
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            success: true,
+            message: `Note ${id} has been deleted`,
+            deleted_note_id: id
+          }, null, 2)
+        }]
+      };
+    } catch (error) {
+      console.error(`Error deleting note ${id}:`, error);
+      return {
+        content: [{
+          type: "text",
+          text: `Error deleting note: ${getErrorMessage(error)}`
+        }],
+        isError: true
+      };
+    }
+  }
+);
+
+// --- Lead Write Operations ---
+
+server.tool(
+  "create-lead",
+  "Create a new lead in Pipedrive. Must be linked to a person or organization (or both).",
+  {
+    title: z.string().describe("Lead title (required)"),
+    personId: z.number().optional().describe("ID of the person associated with this lead"),
+    organizationId: z.number().optional().describe("ID of the organization associated with this lead"),
+    value: z.number().optional().describe("Potential value of the lead"),
+    ownerId: z.number().optional().describe("Owner user ID"),
+    expectedCloseDate: z.string().optional().describe("Expected close date (YYYY-MM-DD)")
+  },
+  async ({ title, personId, organizationId, value, ownerId, expectedCloseDate }) => {
+    try {
+      if (!title || title.trim() === '') {
+        return {
+          content: [{
+            type: "text",
+            text: "Error: 'title' is required and cannot be empty"
+          }],
+          isError: true
+        };
+      }
+
+      if (!personId && !organizationId) {
+        return {
+          content: [{
+            type: "text",
+            text: "Error: Lead must be linked to at least one person (personId) or organization (organizationId)"
+          }],
+          isError: true
+        };
+      }
+
+      const newLead: any = {
+        title: title.trim()
+      };
+
+      if (personId) newLead.person_id = personId;
+      if (organizationId) newLead.organization_id = organizationId;
+      if (value !== undefined) newLead.value = { amount: value, currency: 'USD' };
+      if (ownerId) newLead.owner_id = ownerId;
+      if (expectedCloseDate) newLead.expected_close_date = expectedCloseDate;
+
+      // @ts-ignore - Old SDK pattern: pass object directly
+      const response = await leadsApi.addLead(newLead);
+
+      if (!response.data) {
+        return {
+          content: [{
+            type: "text",
+            text: "Error: API returned no data"
+          }],
+          isError: true
+        };
+      }
+
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            success: true,
+            message: `Lead "${response.data.title}" created successfully`,
+            lead_id: response.data.id,
+            lead: response.data
+          }, null, 2)
+        }]
+      };
+    } catch (error) {
+      console.error("Error creating lead:", error);
+      return {
+        content: [{
+          type: "text",
+          text: `Error creating lead: ${getErrorMessage(error)}`
+        }],
+        isError: true
+      };
+    }
+  }
+);
+
+server.tool(
+  "update-lead",
+  "Update an existing lead in Pipedrive",
+  {
+    id: z.string().describe("Lead ID (UUID format, required)"),
+    title: z.string().optional().describe("Lead title"),
+    personId: z.number().optional().describe("Person ID"),
+    organizationId: z.number().optional().describe("Organization ID"),
+    value: z.number().optional().describe("Lead value"),
+    ownerId: z.number().optional().describe("Owner user ID"),
+    expectedCloseDate: z.string().optional().describe("Expected close date (YYYY-MM-DD)")
+  },
+  async ({ id, title, personId, organizationId, value, ownerId, expectedCloseDate }) => {
+    try {
+      // Verify lead exists
+      // @ts-ignore
+      const existing = await leadsApi.getLead({ id });
+      if (!existing.data) {
+        return {
+          content: [{
+            type: "text",
+            text: `Error: Lead ${id} not found`
+          }],
+          isError: true
+        };
+      }
+
+      const updateLead: any = {};
+
+      if (title) updateLead.title = title;
+      if (personId) updateLead.person_id = personId;
+      if (organizationId) updateLead.organization_id = organizationId;
+      if (value !== undefined) updateLead.value = { amount: value, currency: 'USD' };
+      if (ownerId) updateLead.owner_id = ownerId;
+      if (expectedCloseDate) updateLead.expected_close_date = expectedCloseDate;
+
+      // @ts-ignore - Old SDK pattern: (id, updateObject)
+      const response = await leadsApi.updateLead(id, updateLead);
+
+      if (!response.data) {
+        return {
+          content: [{
+            type: "text",
+            text: "Error: API returned no data"
+          }],
+          isError: true
+        };
+      }
+
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            success: true,
+            message: `Lead ${id} updated successfully`,
+            lead: response.data
+          }, null, 2)
+        }]
+      };
+    } catch (error) {
+      console.error(`Error updating lead ${id}:`, error);
+      return {
+        content: [{
+          type: "text",
+          text: `Error updating lead: ${getErrorMessage(error)}`
+        }],
+        isError: true
+      };
+    }
+  }
+);
+
+server.tool(
+  "delete-lead",
+  "Delete a lead. CAUTION: This is a destructive operation.",
+  {
+    id: z.string().describe("Lead ID (UUID format) to delete"),
+    confirm: z.literal(true).describe("Must be set to true to confirm deletion")
+  },
+  async ({ id, confirm }) => {
+    try {
+      // Verify lead exists
+      // @ts-ignore
+      const existing = await leadsApi.getLead({ id });
+      if (!existing.data) {
+        return {
+          content: [{
+            type: "text",
+            text: `Error: Lead ${id} not found`
+          }],
+          isError: true
+        };
+      }
+
+      const leadTitle = existing.data.title;
+
+      // @ts-ignore
+      await leadsApi.deleteLead({ id });
+
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            success: true,
+            message: `Lead "${leadTitle}" (ID: ${id}) has been deleted`,
+            deleted_lead_id: id
+          }, null, 2)
+        }]
+      };
+    } catch (error) {
+      console.error(`Error deleting lead ${id}:`, error);
+      return {
+        content: [{
+          type: "text",
+          text: `Error deleting lead: ${getErrorMessage(error)}`
+        }],
+        isError: true
+      };
+    }
+  }
+);
+
+server.tool(
+  "convert-lead-to-deal",
+  "Convert a lead to a deal. Returns a conversion job ID for tracking status.",
+  {
+    id: z.string().describe("Lead ID (UUID format) to convert"),
+    stageId: z.number().optional().describe("Pipeline stage ID for the new deal"),
+    dealTitle: z.string().optional().describe("Title for the new deal (defaults to lead title)"),
+    personId: z.number().optional().describe("Person ID (if different from lead's person)"),
+    organizationId: z.number().optional().describe("Organization ID (if different from lead's org)")
+  },
+  async ({ id, stageId, dealTitle, personId, organizationId }) => {
+    try {
+      const convertRequest: any = {};
+
+      if (stageId) convertRequest.stage_id = stageId;
+      if (dealTitle) convertRequest.deal_title = dealTitle;
+      if (personId) convertRequest.person_id = personId;
+      if (organizationId) convertRequest.organization_id = organizationId;
+
+      // @ts-ignore
+      const response = await leadsApi.convertLeadToDeal({ id, convertRequest });
+
+      if (!response.data) {
+        return {
+          content: [{
+            type: "text",
+            text: "Error: API returned no data"
+          }],
+          isError: true
+        };
+      }
+
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            success: true,
+            message: `Lead conversion initiated successfully`,
+            conversion_id: response.data.conversion_id,
+            note: "Conversion is processing. Use the conversion_id to check status via Pipedrive API if needed.",
+            data: response.data
+          }, null, 2)
+        }]
+      };
+    } catch (error) {
+      console.error(`Error converting lead ${id}:`, error);
+      return {
+        content: [{
+          type: "text",
+          text: `Error converting lead: ${getErrorMessage(error)}`
         }],
         isError: true
       };
