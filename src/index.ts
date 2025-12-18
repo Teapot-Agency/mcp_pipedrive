@@ -543,14 +543,25 @@ server.tool(
 // Search persons
 server.tool(
   "search-persons",
-  "Search persons by term",
+  "Search persons by name, email, phone, notes and/or custom fields. Use fields parameter to search specific fields like 'notes' to find keywords in notes.",
   {
-    term: z.string().describe("Search term for persons")
+    term: z.string().describe("Search term for persons (minimum 2 characters)"),
+    fields: z.string().optional().describe("Comma-separated fields to search: name, email, phone, notes, custom_fields. Defaults to all fields. Use 'notes' to search within person notes."),
+    exactMatch: z.boolean().optional().describe("If true, only exact matches are returned (not case sensitive)"),
+    organizationId: z.number().optional().describe("Filter persons by organization ID"),
+    limit: z.number().optional().describe("Limit of entries to return (max 500, default 100)")
   },
-  async ({ term }) => {
+  async ({ term, fields, exactMatch, organizationId, limit }) => {
     try {
+      // Build search options
+      const searchOptions: Record<string, unknown> = { term };
+      if (fields) searchOptions.fields = fields;
+      if (exactMatch !== undefined) searchOptions.exact_match = exactMatch;
+      if (organizationId) searchOptions.organization_id = organizationId;
+      if (limit) searchOptions.limit = limit;
+
       // @ts-ignore - Bypass incorrect TypeScript definition
-      const response = await personsApi.searchPersons(term);
+      const response = await personsApi.searchPersons(searchOptions);
       return {
         content: [{
           type: "text",
@@ -563,6 +574,46 @@ server.tool(
         content: [{
           type: "text",
           text: `Error searching persons: ${getErrorMessage(error)}`
+        }],
+        isError: true
+      };
+    }
+  }
+);
+
+// Get notes for a specific person
+server.tool(
+  "get-person-notes",
+  "Get all notes attached to a specific person",
+  {
+    personId: z.number().describe("Pipedrive person ID"),
+    limit: z.number().optional().describe("Maximum number of notes to return (default: 100)")
+  },
+  async ({ personId, limit = 100 }) => {
+    try {
+      // @ts-ignore - Bypass incorrect TypeScript definition
+      const notesResponse = await notesApi.getNotes({
+        person_id: personId,
+        limit: limit
+      });
+
+      const notes = notesResponse.data || [];
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            summary: `Retrieved ${notes.length} notes for person ${personId}`,
+            person_id: personId,
+            notes: notes
+          }, null, 2)
+        }]
+      };
+    } catch (error) {
+      console.error(`Error fetching notes for person ${personId}:`, error);
+      return {
+        content: [{
+          type: "text",
+          text: `Error fetching notes for person ${personId}: ${getErrorMessage(error)}`
         }],
         isError: true
       };
