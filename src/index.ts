@@ -621,6 +621,88 @@ server.tool(
   }
 );
 
+// Search persons by attached notes content
+server.tool(
+  "search-persons-by-notes",
+  "Search for persons who have attached notes containing a specific keyword. This searches the content of notes linked to persons.",
+  {
+    keyword: z.string().describe("Keyword to search for in note content (case-insensitive)"),
+    limit: z.number().optional().describe("Maximum number of notes to fetch (default: 500)")
+  },
+  async ({ keyword, limit = 500 }) => {
+    try {
+      // Get all notes and filter by content
+      // @ts-ignore - Bypass incorrect TypeScript definition
+      const notesResponse = await notesApi.getNotes({ limit });
+      const allNotes = notesResponse.data || [];
+
+      // Filter notes that contain the keyword and are linked to a person
+      const keywordLower = keyword.toLowerCase();
+      const matchingNotes = allNotes.filter((note: any) => {
+        const content = note.content || '';
+        return note.person_id && content.toLowerCase().includes(keywordLower);
+      });
+
+      // Get unique person IDs
+      const personIds = [...new Set(matchingNotes.map((note: any) => note.person_id))];
+
+      // Fetch person details for each match
+      const personsWithNotes: any[] = [];
+      for (const personId of personIds) {
+        try {
+          // @ts-ignore - Bypass incorrect TypeScript definition
+          const personResponse = await personsApi.getPerson(personId);
+          const person = personResponse.data;
+
+          // Get the matching notes for this person
+          const personNotes = matchingNotes
+            .filter((note: any) => note.person_id === personId)
+            .map((note: any) => ({
+              id: note.id,
+              content: note.content,
+              add_time: note.add_time,
+              update_time: note.update_time
+            }));
+
+          personsWithNotes.push({
+            person: {
+              id: person.id,
+              name: person.name,
+              email: person.email,
+              phone: person.phone,
+              org_id: person.org_id,
+              org_name: person.org_name
+            },
+            matching_notes: personNotes
+          });
+        } catch (personError) {
+          console.error(`Error fetching person ${personId}:`, personError);
+        }
+      }
+
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            summary: `Found ${personsWithNotes.length} persons with notes containing "${keyword}"`,
+            keyword: keyword,
+            results: personsWithNotes
+          }, null, 2)
+        }]
+      };
+    } catch (error) {
+      console.error(`Error searching persons by notes with keyword "${keyword}":`, error);
+      return {
+        content: [{
+          type: "text",
+          text: `Error searching persons by notes: ${getErrorMessage(error)}`
+        }],
+        isError: true
+      };
+    }
+  }
+);
+
 // Get all organizations
 server.tool(
   "get-organizations",

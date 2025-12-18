@@ -8,7 +8,7 @@ A Model Context Protocol (MCP) server that provides full CRUD access to Pipedriv
 ## 🚀 Features
 
 - **Full CRUD Operations** - Create, Read, Update, and Delete support for all major Pipedrive entities
-- **37 Total Tools** - 17 read operations + 20 write operations
+- **38 Total Tools** - 18 read operations + 20 write operations
 - **Complete Data Access** - Deals, persons, organizations, activities, notes, and leads
 - **Custom Fields Support** - Full access to custom fields and configurations
 - **Built-in Safety** - Mandatory confirmation for delete operations, soft delete with 30-day recovery
@@ -169,7 +169,7 @@ To use this server with Claude for Desktop:
 
 ## Available Tools
 
-### Read Operations (17 tools)
+### Read Operations (18 tools)
 
 **Users & Search:**
 - `get-users`: Get all users/owners from Pipedrive to identify owner IDs for filtering
@@ -186,6 +186,7 @@ To use this server with Claude for Desktop:
 - `get-person`: Get a specific person by ID (including custom fields)
 - `get-person-notes`: Get all notes attached to a specific person
 - `search-persons`: Search persons by name, email, phone, notes, and custom fields (supports `fields` parameter to search in specific fields like `notes`)
+- `search-persons-by-notes`: Search for persons who have attached notes containing a specific keyword
 
 **Organizations:**
 - `get-organizations`: Get all organizations from Pipedrive (including custom fields)
