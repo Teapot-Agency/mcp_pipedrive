@@ -618,7 +618,7 @@ server.tool(
 // Search persons
 server.tool(
   "search-persons",
-  "Search persons using Pipedrive's search API. NOTE: If this returns empty results, try using 'find-person' tool instead for more flexible fuzzy matching.",
+  "⚠️ FALLBACK TOOL - Use 'find-person' instead for most searches. This uses Pipedrive's native search which often returns empty results. Only use this for: (1) searching within notes content with fields='notes', (2) searching custom fields, (3) when exact matching is required.",
   {
     term: z.string().describe("Search term for persons (minimum 2 characters recommended)"),
     fields: z.string().optional().describe("Comma-separated fields to search: name, email, phone, notes, custom_fields. Defaults to all fields. Use 'notes' to search within person notes."),
@@ -807,10 +807,10 @@ server.tool(
   }
 );
 
-// Find person with fuzzy matching
+// Find person with fuzzy matching - PRIMARY SEARCH TOOL
 server.tool(
   "find-person",
-  "Find persons using fuzzy matching across name, email, phone, and organization. More flexible than search-persons when exact terms are unknown.",
+  "⭐ PRIMARY TOOL for finding persons - USE THIS BY DEFAULT. Reliable fuzzy matching across name, email, phone, and company. Returns scored results ranked by relevance. Preferred over search-persons for most lookups.",
   {
     name: z.string().optional().describe("Person name to search for (fuzzy match)"),
     company: z.string().optional().describe("Company/organization name to search for (fuzzy match)"),
