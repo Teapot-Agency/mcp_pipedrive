@@ -8,12 +8,14 @@ A Model Context Protocol (MCP) server that provides full CRUD access to Pipedriv
 ## 🚀 Features
 
 - **Full CRUD Operations** - Create, Read, Update, and Delete support for all major Pipedrive entities
-- **38 Total Tools** - 18 read operations + 20 write operations
+- **40 Total Tools** - 20 read operations + 20 write operations
 - **Complete Data Access** - Deals, persons, organizations, activities, notes, and leads
 - **Custom Fields Support** - Full access to custom fields and configurations
 - **Built-in Safety** - Mandatory confirmation for delete operations, soft delete with 30-day recovery
 - **Rate Limiting** - Automatic request throttling to respect API limits
-- **Advanced Filtering** - Filter deals by owner, status, date range, value, and more
+- **Advanced Filtering** - Filter deals by owner, status, date range, value, and more. Filter persons by name, email, organization, or phone
+- **Fuzzy Search** - New `find-person` tool with intelligent fuzzy matching and scoring
+- **Smart Error Messages** - Helpful suggestions when searches return no results
 - **JWT Authentication** - Optional JWT security for SSE transport
 - **Docker Support** - Multi-stage builds and container deployment
 - **Dual Transport** - stdio (local) and SSE (HTTP) modes
@@ -169,11 +171,11 @@ To use this server with Claude for Desktop:
 
 ## Available Tools
 
-### Read Operations (18 tools)
+### Read Operations (20 tools)
 
 **Users & Search:**
 - `get-users`: Get all users/owners from Pipedrive to identify owner IDs for filtering
-- `search-all`: Search across all item types (deals, persons, organizations, etc.)
+- `search-all`: Search across all item types (deals, persons, organizations, etc.) with improved error messages
 
 **Deals:**
 - `get-deals`: Get deals with flexible filtering options (search by title, date range, owner, stage, status, value range, etc.)
@@ -181,17 +183,19 @@ To use this server with Claude for Desktop:
 - `get-deal-notes`: Get detailed notes and custom booking details for a specific deal
 - `search-deals`: Search deals by term
 
-**Persons:**
-- `get-persons`: Get all persons from Pipedrive (including custom fields)
+**Persons (NEW & IMPROVED):**
+- `get-persons`: 🆕 **Enhanced** - Get all persons with optional filtering by name, email, phone, organization ID, or organization name
+- `find-person`: ✨ **NEW** - Find persons using fuzzy matching across name, email, phone, and company with intelligent scoring
+- `get-persons-by-organization`: ✨ **NEW** - Get all persons belonging to a specific organization
 - `get-person`: Get a specific person by ID (including custom fields)
 - `get-person-notes`: Get all notes attached to a specific person
-- `search-persons`: Search persons by name, email, phone, notes, and custom fields (supports `fields` parameter to search in specific fields like `notes`)
+- `search-persons`: 🆕 **Enhanced** - Search persons with improved error messages and suggestions
 - `search-persons-by-notes`: Search for persons who have attached notes containing a specific keyword
 
-**Organizations:**
-- `get-organizations`: Get all organizations from Pipedrive (including custom fields)
+**Organizations (NEW & IMPROVED):**
+- `get-organizations`: 🆕 **Enhanced** - Get all organizations with optional filtering by name
 - `get-organization`: Get a specific organization by ID (including custom fields)
-- `search-organizations`: Search organizations by term
+- `search-organizations`: 🆕 **Enhanced** - Search organizations with improved error messages and suggestions
 
 **Pipelines & Stages:**
 - `get-pipelines`: Get all pipelines from Pipedrive
@@ -261,6 +265,73 @@ Deleted items can be recovered within 30 days via Pipedrive UI:
 - `analyze-leads`: Analyze leads by status
 - `compare-pipelines`: Compare different pipelines and their stages
 - `find-high-value-deals`: Find high-value deals
+
+## 🔍 Search Improvements (v2.1)
+
+The server now includes powerful new search and filtering capabilities to address common issues with Pipedrive's search API.
+
+### Key Improvements
+
+**Problem:** Pipedrive's native search API often returns empty results due to strict matching requirements.
+
+**Solution:** We've added client-side filtering and fuzzy matching tools that are more reliable and flexible.
+
+### Recommended Search Strategy
+
+#### Finding a Person
+
+1. **Best:** Use `find-person` with fuzzy matching
+   ```javascript
+   find-person({ name: "Piotr", company: "Haleon" })
+   ```
+
+2. **Good:** Use `get-persons` with filters
+   ```javascript
+   get-persons({ filterName: "Piotr", organizationName: "Haleon" })
+   ```
+
+3. **Fallback:** Use `search-persons` (Pipedrive's API)
+   ```javascript
+   search-persons({ term: "Piotr" })
+   ```
+
+#### Finding an Organization
+
+1. **Recommended:** Use `get-organizations` with filter
+   ```javascript
+   get-organizations({ filterName: "Haleon" })
+   ```
+
+2. **Fallback:** Use `search-organizations` (Pipedrive's API)
+   ```javascript
+   search-organizations({ term: "Haleon" })
+   ```
+
+### New Tools
+
+- **`find-person`**: Fuzzy matching with scoring across multiple fields
+- **`get-persons-by-organization`**: Get all persons in a specific organization
+- **Enhanced `get-persons`**: Filter by name, email, phone, organization
+- **Enhanced `get-organizations`**: Filter by name
+
+### Smart Error Messages
+
+When searches return no results, you'll now get helpful feedback:
+
+```json
+{
+  "items": [],
+  "warning": "No results found using Pipedrive's search API",
+  "suggestion": "Try using 'find-person' for fuzzy matching",
+  "possible_reasons": [
+    "Search term may be too short",
+    "Pipedrive search requires exact matches",
+    "Try alternative tools"
+  ]
+}
+```
+
+For detailed documentation of all improvements, see [IMPROVEMENTS.md](./IMPROVEMENTS.md)
 
 ## License
 

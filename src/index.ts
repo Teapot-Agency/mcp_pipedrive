@@ -486,15 +486,90 @@ server.tool(
 // Get all persons
 server.tool(
   "get-persons",
-  "Get all persons from Pipedrive including custom fields",
-  {},
-  async () => {
+  "Get all persons from Pipedrive with optional filtering by name, email, organization, or phone",
+  {
+    filterName: z.string().optional().describe("Filter persons by name (case-insensitive partial match)"),
+    filterEmail: z.string().optional().describe("Filter persons by email (case-insensitive partial match)"),
+    filterPhone: z.string().optional().describe("Filter persons by phone (partial match)"),
+    organizationId: z.number().optional().describe("Filter persons by organization ID"),
+    organizationName: z.string().optional().describe("Filter persons by organization name (case-insensitive partial match)"),
+    limit: z.number().optional().describe("Maximum number of persons to return (default: 100)")
+  },
+  async ({ filterName, filterEmail, filterPhone, organizationId, organizationName, limit = 100 }) => {
     try {
-      const response = await personsApi.getPersons();
+      // Fetch all persons
+      // @ts-ignore - getPersons parameters may not be fully typed
+      const response = await personsApi.getPersons({ limit: limit > 500 ? 500 : limit });
+      let persons = response.data || [];
+
+      // Apply client-side filters
+      if (filterName) {
+        const nameLower = filterName.toLowerCase();
+        persons = persons.filter((person: any) =>
+          person.name && person.name.toLowerCase().includes(nameLower)
+        );
+      }
+
+      if (filterEmail) {
+        const emailLower = filterEmail.toLowerCase();
+        persons = persons.filter((person: any) => {
+          if (!person.email) return false;
+          // Handle email as array of objects or string
+          if (Array.isArray(person.email)) {
+            return person.email.some((e: any) =>
+              e.value && e.value.toLowerCase().includes(emailLower)
+            );
+          }
+          return String(person.email).toLowerCase().includes(emailLower);
+        });
+      }
+
+      if (filterPhone) {
+        const phoneLower = filterPhone.toLowerCase();
+        persons = persons.filter((person: any) => {
+          if (!person.phone) return false;
+          // Handle phone as array of objects or string
+          if (Array.isArray(person.phone)) {
+            return person.phone.some((p: any) =>
+              p.value && String(p.value).toLowerCase().includes(phoneLower)
+            );
+          }
+          return String(person.phone).toLowerCase().includes(phoneLower);
+        });
+      }
+
+      if (organizationId) {
+        persons = persons.filter((person: any) =>
+          person.org_id && person.org_id.value === organizationId
+        );
+      }
+
+      if (organizationName) {
+        const orgNameLower = organizationName.toLowerCase();
+        persons = persons.filter((person: any) =>
+          person.org_name && person.org_name.toLowerCase().includes(orgNameLower)
+        );
+      }
+
+      // Build filter summary
+      const filtersApplied: string[] = [];
+      if (filterName) filtersApplied.push(`name contains "${filterName}"`);
+      if (filterEmail) filtersApplied.push(`email contains "${filterEmail}"`);
+      if (filterPhone) filtersApplied.push(`phone contains "${filterPhone}"`);
+      if (organizationId) filtersApplied.push(`org_id = ${organizationId}`);
+      if (organizationName) filtersApplied.push(`org_name contains "${organizationName}"`);
+
       return {
         content: [{
           type: "text",
-          text: JSON.stringify(response.data, null, 2)
+          text: JSON.stringify({
+            summary: filtersApplied.length > 0
+              ? `Found ${persons.length} persons matching filters: ${filtersApplied.join(', ')}`
+              : `Found ${persons.length} persons`,
+            total_found: persons.length,
+            filters_applied: filtersApplied,
+            persons: persons.slice(0, limit) // Apply limit
+          }, null, 2)
         }]
       };
     } catch (error) {
@@ -543,9 +618,9 @@ server.tool(
 // Search persons
 server.tool(
   "search-persons",
-  "Search persons by name, email, phone, notes and/or custom fields. Use fields parameter to search specific fields like 'notes' to find keywords in notes.",
+  "Search persons using Pipedrive's search API. NOTE: If this returns empty results, try using 'find-person' tool instead for more flexible fuzzy matching.",
   {
-    term: z.string().describe("Search term for persons (minimum 2 characters)"),
+    term: z.string().describe("Search term for persons (minimum 2 characters recommended)"),
     fields: z.string().optional().describe("Comma-separated fields to search: name, email, phone, notes, custom_fields. Defaults to all fields. Use 'notes' to search within person notes."),
     exactMatch: z.boolean().optional().describe("If true, only exact matches are returned (not case sensitive)"),
     organizationId: z.number().optional().describe("Filter persons by organization ID"),
@@ -562,10 +637,36 @@ server.tool(
 
       // @ts-ignore - Bypass incorrect TypeScript definition
       const response = await personsApi.searchPersons(searchOptions);
+      const results = response.data?.items || response.data || [];
+
+      // Provide helpful feedback if no results
+      if (!results || results.length === 0) {
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              items: [],
+              warning: "No results found using Pipedrive's search API",
+              suggestion: "The search API may require specific conditions. Try using the 'find-person' tool for more flexible fuzzy matching, or use 'get-persons' with filter parameters.",
+              search_term: term,
+              possible_reasons: [
+                "Search term may be too short (try 3+ characters)",
+                "Pipedrive search may require exact word matches",
+                "Search index may not be fully populated",
+                "Try searching by different fields (name, email, organization)"
+              ]
+            }, null, 2)
+          }]
+        };
+      }
+
       return {
         content: [{
           type: "text",
-          text: JSON.stringify(response.data, null, 2)
+          text: JSON.stringify({
+            summary: `Found ${results.length} persons`,
+            items: results
+          }, null, 2)
         }]
       };
     } catch (error) {
@@ -573,7 +674,10 @@ server.tool(
       return {
         content: [{
           type: "text",
-          text: `Error searching persons: ${getErrorMessage(error)}`
+          text: JSON.stringify({
+            error: `Error searching persons: ${getErrorMessage(error)}`,
+            suggestion: "Try using 'find-person' or 'get-persons' with filters instead"
+          }, null, 2)
         }],
         isError: true
       };
@@ -703,18 +807,225 @@ server.tool(
   }
 );
 
-// Get all organizations
+// Find person with fuzzy matching
 server.tool(
-  "get-organizations",
-  "Get all organizations from Pipedrive including custom fields",
-  {},
-  async () => {
+  "find-person",
+  "Find persons using fuzzy matching across name, email, phone, and organization. More flexible than search-persons when exact terms are unknown.",
+  {
+    name: z.string().optional().describe("Person name to search for (fuzzy match)"),
+    company: z.string().optional().describe("Company/organization name to search for (fuzzy match)"),
+    email: z.string().optional().describe("Email to search for (partial match)"),
+    phone: z.string().optional().describe("Phone number to search for (partial match)"),
+    limit: z.number().optional().describe("Maximum number of results to return (default: 20)")
+  },
+  async ({ name, company, email, phone, limit = 20 }) => {
     try {
-      const response = await organizationsApi.getOrganizations();
+      if (!name && !company && !email && !phone) {
+        return {
+          content: [{
+            type: "text",
+            text: "Error: At least one search parameter (name, company, email, or phone) is required"
+          }],
+          isError: true
+        };
+      }
+
+      // Fetch all persons (with a reasonable limit)
+      // @ts-ignore - getPersons parameters may not be fully typed
+      const response = await personsApi.getPersons({ limit: 500 });
+      let persons = response.data || [];
+
+      // Simple fuzzy matching function
+      const fuzzyMatch = (text: string, pattern: string): boolean => {
+        const textLower = text.toLowerCase();
+        const patternLower = pattern.toLowerCase();
+
+        // Exact substring match
+        if (textLower.includes(patternLower)) return true;
+
+        // Word boundary match (matches if any word starts with pattern)
+        const words = textLower.split(/\s+/);
+        if (words.some(word => word.startsWith(patternLower))) return true;
+
+        return false;
+      };
+
+      // Score each person based on matches
+      const scoredPersons = persons.map((person: any) => {
+        let score = 0;
+        const matches: string[] = [];
+
+        // Name matching
+        if (name && person.name) {
+          if (fuzzyMatch(person.name, name)) {
+            score += 10;
+            matches.push(`name matches "${name}"`);
+          }
+        }
+
+        // Company/organization matching
+        if (company && person.org_name) {
+          if (fuzzyMatch(person.org_name, company)) {
+            score += 8;
+            matches.push(`company matches "${company}"`);
+          }
+        }
+
+        // Email matching
+        if (email && person.email) {
+          const emailStr = Array.isArray(person.email)
+            ? person.email.map((e: any) => e.value).join(' ')
+            : String(person.email);
+          if (emailStr.toLowerCase().includes(email.toLowerCase())) {
+            score += 7;
+            matches.push(`email matches "${email}"`);
+          }
+        }
+
+        // Phone matching
+        if (phone && person.phone) {
+          const phoneStr = Array.isArray(person.phone)
+            ? person.phone.map((p: any) => p.value).join(' ')
+            : String(person.phone);
+          if (phoneStr.includes(phone)) {
+            score += 6;
+            matches.push(`phone matches "${phone}"`);
+          }
+        }
+
+        return { person, score, matches };
+      });
+
+      // Filter persons with score > 0 and sort by score (highest first)
+      const matchedPersons = scoredPersons
+        .filter((item: any) => item.score > 0)
+        .sort((a: any, b: any) => b.score - a.score)
+        .slice(0, limit);
+
+      // Format results
+      const results = matchedPersons.map((item: any) => ({
+        id: item.person.id,
+        name: item.person.name,
+        email: item.person.email,
+        phone: item.person.phone,
+        org_id: item.person.org_id,
+        org_name: item.person.org_name,
+        match_score: item.score,
+        match_reasons: item.matches
+      }));
+
+      const searchCriteria = [];
+      if (name) searchCriteria.push(`name: "${name}"`);
+      if (company) searchCriteria.push(`company: "${company}"`);
+      if (email) searchCriteria.push(`email: "${email}"`);
+      if (phone) searchCriteria.push(`phone: "${phone}"`);
+
       return {
         content: [{
           type: "text",
-          text: JSON.stringify(response.data, null, 2)
+          text: JSON.stringify({
+            summary: `Found ${results.length} persons matching search criteria`,
+            search_criteria: searchCriteria,
+            total_found: results.length,
+            results: results
+          }, null, 2)
+        }]
+      };
+    } catch (error) {
+      console.error("Error finding persons:", error);
+      return {
+        content: [{
+          type: "text",
+          text: `Error finding persons: ${getErrorMessage(error)}`
+        }],
+        isError: true
+      };
+    }
+  }
+);
+
+// Get persons by organization
+server.tool(
+  "get-persons-by-organization",
+  "Get all persons belonging to a specific organization",
+  {
+    organizationId: z.number().describe("Organization ID"),
+    limit: z.number().optional().describe("Maximum number of persons to return (default: 100)")
+  },
+  async ({ organizationId, limit = 100 }) => {
+    try {
+      // Fetch persons and filter by organization
+      // @ts-ignore - getPersons parameters may not be fully typed
+      const response = await personsApi.getPersons({ limit: 500 });
+      let persons = response.data || [];
+
+      // Filter by organization ID
+      persons = persons.filter((person: any) => {
+        // Handle org_id as object or number
+        const orgId = person.org_id?.value || person.org_id;
+        return orgId === organizationId;
+      });
+
+      // Apply limit
+      persons = persons.slice(0, limit);
+
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            summary: `Found ${persons.length} persons in organization ${organizationId}`,
+            organization_id: organizationId,
+            total_found: persons.length,
+            persons: persons
+          }, null, 2)
+        }]
+      };
+    } catch (error) {
+      console.error(`Error fetching persons for organization ${organizationId}:`, error);
+      return {
+        content: [{
+          type: "text",
+          text: `Error fetching persons for organization: ${getErrorMessage(error)}`
+        }],
+        isError: true
+      };
+    }
+  }
+);
+
+// Get all organizations
+server.tool(
+  "get-organizations",
+  "Get all organizations from Pipedrive with optional filtering by name",
+  {
+    filterName: z.string().optional().describe("Filter organizations by name (case-insensitive partial match)"),
+    limit: z.number().optional().describe("Maximum number of organizations to return (default: 100)")
+  },
+  async ({ filterName, limit = 100 }) => {
+    try {
+      // @ts-ignore - getOrganizations parameters may not be fully typed
+      const response = await organizationsApi.getOrganizations({ limit: limit > 500 ? 500 : limit });
+      let organizations = response.data || [];
+
+      // Apply client-side name filter
+      if (filterName) {
+        const nameLower = filterName.toLowerCase();
+        organizations = organizations.filter((org: any) =>
+          org.name && org.name.toLowerCase().includes(nameLower)
+        );
+      }
+
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            summary: filterName
+              ? `Found ${organizations.length} organizations matching name "${filterName}"`
+              : `Found ${organizations.length} organizations`,
+            total_found: organizations.length,
+            ...(filterName && { filter_applied: `name contains "${filterName}"` }),
+            organizations: organizations.slice(0, limit)
+          }, null, 2)
         }]
       };
     } catch (error) {
@@ -763,18 +1074,44 @@ server.tool(
 // Search organizations
 server.tool(
   "search-organizations",
-  "Search organizations by term",
+  "Search organizations using Pipedrive's search API. NOTE: If this returns empty results, try using 'get-organizations' with filterName parameter instead.",
   {
-    term: z.string().describe("Search term for organizations")
+    term: z.string().describe("Search term for organizations (minimum 2 characters recommended)")
   },
   async ({ term }) => {
     try {
       // @ts-ignore - API method exists but TypeScript definition is wrong
       const response = await (organizationsApi as any).searchOrganization({ term });
+      const results = response.data?.items || response.data || [];
+
+      // Provide helpful feedback if no results
+      if (!results || results.length === 0) {
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              items: [],
+              warning: "No results found using Pipedrive's search API",
+              suggestion: "Try using 'get-organizations' with filterName parameter for client-side filtering, which is more reliable.",
+              search_term: term,
+              possible_reasons: [
+                "Search term may be too short (try 3+ characters)",
+                "Pipedrive search may require exact word matches",
+                "Search index may not be fully populated"
+              ],
+              alternative: `Use: get-organizations with filterName="${term}"`
+            }, null, 2)
+          }]
+        };
+      }
+
       return {
         content: [{
           type: "text",
-          text: JSON.stringify(response.data, null, 2)
+          text: JSON.stringify({
+            summary: `Found ${results.length} organizations`,
+            items: results
+          }, null, 2)
         }]
       };
     } catch (error) {
@@ -782,7 +1119,10 @@ server.tool(
       return {
         content: [{
           type: "text",
-          text: `Error searching organizations: ${getErrorMessage(error)}`
+          text: JSON.stringify({
+            error: `Error searching organizations: ${getErrorMessage(error)}`,
+            suggestion: "Try using 'get-organizations' with filterName parameter instead"
+          }, null, 2)
         }],
         isError: true
       };
@@ -932,22 +1272,55 @@ server.tool(
 // Generic search across item types
 server.tool(
   "search-all",
-  "Search across all item types (deals, persons, organizations, etc.)",
+  "Search across all item types using Pipedrive's search API. NOTE: If this returns empty results, try using specific tools like 'find-person', 'get-persons', 'get-organizations', or 'get-deals' with filter parameters.",
   {
-    term: z.string().describe("Search term"),
+    term: z.string().describe("Search term (minimum 2 characters recommended)"),
     itemTypes: z.string().optional().describe("Comma-separated list of item types to search (deal,person,organization,product,file,activity,lead)")
   },
   async ({ term, itemTypes }) => {
     try {
       const itemType = itemTypes; // Just rename the parameter
-      const response = await itemSearchApi.searchItem({ 
+      const response = await itemSearchApi.searchItem({
         term,
-        itemType 
+        itemType
       });
+      const results = response.data?.items || response.data || [];
+
+      // Provide helpful feedback if no results
+      if (!results || results.length === 0) {
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              items: [],
+              warning: "No results found using Pipedrive's search API",
+              suggestion: "Pipedrive's search API may require specific conditions. Try using specific tools with filter parameters instead:",
+              search_term: term,
+              item_types: itemTypes || "all",
+              alternatives: {
+                for_persons: `find-person with name="${term}" or get-persons with filterName="${term}"`,
+                for_organizations: `get-organizations with filterName="${term}"`,
+                for_deals: `get-deals with searchTitle="${term}"`
+              },
+              possible_reasons: [
+                "Search term may be too short (try 3+ characters)",
+                "Pipedrive search may require exact word matches",
+                "Search index may not be fully populated for this item type"
+              ]
+            }, null, 2)
+          }]
+        };
+      }
+
       return {
         content: [{
           type: "text",
-          text: JSON.stringify(response.data, null, 2)
+          text: JSON.stringify({
+            summary: `Found ${results.length} items`,
+            search_term: term,
+            item_types: itemTypes || "all",
+            items: results
+          }, null, 2)
         }]
       };
     } catch (error) {
@@ -955,7 +1328,10 @@ server.tool(
       return {
         content: [{
           type: "text",
-          text: `Error performing search: ${getErrorMessage(error)}`
+          text: JSON.stringify({
+            error: `Error performing search: ${getErrorMessage(error)}`,
+            suggestion: "Try using specific tools: find-person, get-persons, get-organizations, or get-deals with filter parameters"
+          }, null, 2)
         }],
         isError: true
       };
