@@ -735,20 +735,50 @@ server.tool(
   },
   async ({ keyword, limit = 500 }) => {
     try {
-      // Get all notes and filter by content
-      // @ts-ignore - Bypass incorrect TypeScript definition
-      const notesResponse = await notesApi.getNotes({ limit });
-      const allNotes = notesResponse.data || [];
+      // Get all notes with pagination to ensure we search through all of them
+      const allNotes: any[] = [];
+      let start = 0;
+      const pageSize = 100; // Fetch in batches of 100
+      let hasMore = true;
+
+      while (hasMore && allNotes.length < limit) {
+        // @ts-ignore - Bypass incorrect TypeScript definition
+        const notesResponse = await notesApi.getNotes({ start, limit: pageSize });
+        const notes = notesResponse.data || [];
+        allNotes.push(...notes);
+
+        // Check if there are more items to fetch
+        const pagination = notesResponse.additional_data?.pagination;
+        hasMore = pagination?.more_items_in_collection === true;
+        start += notes.length;
+
+        // Safety: stop if no notes returned (shouldn't happen, but prevents infinite loop)
+        if (notes.length === 0) break;
+      }
+
+      // Helper to extract person ID (handles various API response formats)
+      const getPersonId = (note: any): number | null => {
+        // Try person_id first (can be object with .value or direct number)
+        if (note.person_id) {
+          return typeof note.person_id === 'object' ? note.person_id.value : note.person_id;
+        }
+        // Some API versions use person.id instead
+        if (note.person?.id) {
+          return note.person.id;
+        }
+        return null;
+      };
 
       // Filter notes that contain the keyword and are linked to a person
       const keywordLower = keyword.toLowerCase();
       const matchingNotes = allNotes.filter((note: any) => {
         const content = note.content || '';
-        return note.person_id && content.toLowerCase().includes(keywordLower);
+        const personId = getPersonId(note);
+        return personId && content.toLowerCase().includes(keywordLower);
       });
 
       // Get unique person IDs
-      const personIds = [...new Set(matchingNotes.map((note: any) => note.person_id))];
+      const personIds = [...new Set(matchingNotes.map((note: any) => getPersonId(note)))];
 
       // Fetch person details for each match
       const personsWithNotes: any[] = [];
@@ -760,7 +790,7 @@ server.tool(
 
           // Get the matching notes for this person
           const personNotes = matchingNotes
-            .filter((note: any) => note.person_id === personId)
+            .filter((note: any) => getPersonId(note) === personId)
             .map((note: any) => ({
               id: note.id,
               content: note.content,
